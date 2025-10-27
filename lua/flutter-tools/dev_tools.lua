@@ -20,6 +20,9 @@ local devtools_url = nil
 ---@type string?
 local profiler_url = nil
 
+---@type string?
+local dtd_url = nil
+
 --- Url containing the app url and the devtools server url
 ---@type string?
 local devtools_profiler_url = nil
@@ -41,6 +44,18 @@ local function try_get_tools_flutter(data) return data:match("(https?://127%.0%.
 --- @return string?
 local function try_get_profiler_url_chrome(data)
   return data:match("(ws%:%/%/127%.0%.0%.1%:%d+/.+/ws)$")
+end
+
+--- The Dart Tooling Daemon is available at: ws://127.0.0.1:43301/mfj4qO3o8iw=
+--- @param data string
+--- @return string?
+local function try_get_dtd_url(data)
+  -- Match websocket URLs that don't end with /ws (to avoid matching profiler URLs)
+  local url = data:match("(ws%:%/%/127%.0%.0%.1%:%d+/[^%s]+)$")
+  if url and not url:match("/ws$") then
+    return url
+  end
+  return nil
 end
 
 ---@param url string
@@ -95,6 +110,13 @@ function M.handle_log(data)
   profiler_url = try_get_profiler_url_chrome(data)
 
   if profiler_url then M.register_profiler_url(profiler_url) end
+
+  if not dtd_url then
+    dtd_url = try_get_dtd_url(data)
+    if dtd_url then
+      ui.notify("Detected DTD url\nExecute FlutterCopyDTDUrl to copy it")
+    end
+  end
 end
 
 function M.register_profiler_url(url)
@@ -232,9 +254,15 @@ function M.get_profiler_url()
   end
 end
 
+---@return string? dtd_url the Dart Tooling Daemon websocket URL
+function M.get_dtd_url()
+  return dtd_url
+end
+
 function M.on_flutter_shutdown()
   profiler_url = nil
   devtools_profiler_url = nil
+  dtd_url = nil
 end
 
 function M.set_devtools_url(url) devtools_url = url end

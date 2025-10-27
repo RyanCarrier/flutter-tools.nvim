@@ -242,6 +242,12 @@ function M.commands(opts)
         command = commands.copy_profiler_url,
       },
       {
+        id = "flutter-tools-copy-dtd-url",
+        label = "Flutter tools: Copy DTD Url",
+        hint = "Run the app first with --print-dtd",
+        command = commands.copy_dtd_url,
+      },
+      {
         id = "flutter-tools-open-dev-tools",
         label = "Open Dev Tools",
         hint = "Open flutter dev tools in the browser",

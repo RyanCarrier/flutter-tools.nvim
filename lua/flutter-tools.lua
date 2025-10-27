@@ -41,6 +41,7 @@ local function setup_commands()
   command("FlutterDevTools", dev_tools.start)
   command("FlutterDevToolsActivate", dev_tools.activate)
   command("FlutterCopyProfilerUrl", commands.copy_profiler_url)
+  command("FlutterCopyDTDUrl", commands.copy_dtd_url)
   command("FlutterOpenDevTools", commands.open_dev_tools)
   command("FlutterPubGet", commands.pub_get)
   command("FlutterPubUpgrade", function(data) commands.pub_upgrade_command(data.args) end, {

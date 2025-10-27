@@ -387,6 +387,22 @@ function M.copy_profiler_url()
   end
 end
 
+function M.copy_dtd_url()
+  if not M.is_running() then
+    ui.notify("You must run the app first!")
+    return
+  end
+
+  local url = dev_tools.get_dtd_url()
+
+  if url then
+    vim.cmd("let @+='" .. url .. "'")
+    ui.notify("DTD url copied to clipboard!")
+  else
+    ui.notify("DTD url not available yet. Please wait for the app to fully start, and make sure to run with --print-dtd")
+  end
+end
+
 ---@param quiet boolean?
 function M.open_dev_tools(quiet) send("open_dev_tools", quiet) end
 
