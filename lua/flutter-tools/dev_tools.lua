@@ -50,8 +50,9 @@ end
 --- @param data string
 --- @return string?
 local function try_get_dtd_url(data)
-  -- Match websocket URLs that don't end with /ws (to avoid matching profiler URLs)
-  local url = data:match("(ws%:%/%/127%.0%.0%.1%:%d+/[^%s]+)$")
+  -- Match websocket URLs from DTD output. The URL appears after "available at:" in the output.
+  -- Match any ws:// URL on localhost that doesn't end with /ws (to avoid matching profiler URLs)
+  local url = data:match("(ws%:%/%/[%d%.]+%:%d+/[^%s]+)")
   if url and not url:match("/ws$") then
     return url
   end
