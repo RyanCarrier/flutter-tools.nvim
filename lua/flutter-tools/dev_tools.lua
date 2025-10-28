@@ -50,13 +50,35 @@ end
 --- @param data string
 --- @return string?
 local function try_get_dtd_url(data)
-  -- Match websocket URLs from DTD output. The URL appears after "available at:" in the output.
-  -- Match any ws:// URL on localhost that doesn't end with /ws (to avoid matching profiler URLs)
-  local url = data:match("(ws%:%/%/[%d%.]+%:%d+/[^%s]+)")
+  -- Match websocket URLs that don't end with /ws (to avoid matching profiler URLs)
+  local url = data:match("(ws%:%/%/127%.0%.0%.1%:%d+/[^%s]+)$")
   if url and not url:match("/ws$") then
     return url
   end
   return nil
+end
+
+--- Fetch DTD URI from DevTools HTTP API
+--- @param url string The DevTools URL (e.g. http://127.0.0.1:9100)
+local function fetch_dtd_uri_from_api(url)
+  local api_endpoint = string.format("%s/api/getDtdUri", url)
+  Job:new({
+    command = "curl",
+    args = { "-s", api_endpoint },
+    on_exit = vim.schedule_wrap(function(job, return_val)
+      if return_val ~= 0 then
+        return
+      end
+      local result = table.concat(job:result(), "\n")
+      if result and result ~= "" then
+        local success, json = pcall(fn.json_decode, result)
+        if success and json and json.dtdUri then
+          dtd_url = json.dtdUri
+          ui.notify("Detected DTD url\nExecute FlutterCopyDTDUrl to copy it")
+        end
+      end
+    end),
+  }):start()
 end
 
 ---@param url string
@@ -111,13 +133,6 @@ function M.handle_log(data)
   profiler_url = try_get_profiler_url_chrome(data)
 
   if profiler_url then M.register_profiler_url(profiler_url) end
-
-  if not dtd_url then
-    dtd_url = try_get_dtd_url(data)
-    if dtd_url then
-      ui.notify("Detected DTD url\nExecute FlutterCopyDTDUrl to copy it")
-    end
-  end
 end
 
 function M.register_profiler_url(url)
@@ -134,6 +149,11 @@ end
 function M.handle_devtools_available()
   start_browser()
   ui.notify("Detected devtools url, execute FlutterCopyProfilerUrl to copy it")
+  -- Fetch DTD URI from DevTools API when we have a DevTools URL
+  local url = devtools_url or (devtools_profiler_url and devtools_profiler_url:match("(https?://[^?]+)"))
+  if url and not dtd_url then
+    fetch_dtd_uri_from_api(url)
+  end
 end
 
 --[[ {
@@ -162,6 +182,10 @@ local function handle_start(_, data, _)
   devtools_url = string.format("http://%s:%s", json.params.host, json.params.port)
   start_browser()
   ui.notify(string.format("Serving DevTools at %s", devtools_url), ui.INFO, { timeout = 10000 })
+  -- Fetch DTD URI from DevTools API
+  if not dtd_url then
+    fetch_dtd_uri_from_api(devtools_url)
+  end
 end
 
 ---Handler errors whilst opening dev tools
