@@ -11,6 +11,7 @@ local job_runner = lazy.require("flutter-tools.runners.job_runner") ---@module "
 local debugger_runner = lazy.require("flutter-tools.runners.debugger_runner") ---@module "flutter-tools.runners.debugger_runner"
 local path = lazy.require("flutter-tools.utils.path") ---@module "flutter-tools.utils.path"
 local dev_log = lazy.require("flutter-tools.log") ---@module "flutter-tools.log"
+local banner = lazy.require("flutter-tools.banner") ---@module "flutter-tools.banner"
 local parser = lazy.require("flutter-tools.utils.yaml_parser")
 local config_utils = lazy.require("flutter-tools.utils.config_utils") ---@module "flutter-tools.utils.config_utils"
 
@@ -26,13 +27,15 @@ local current_device = nil
 ---@field is_running fun(runner: flutter.Runner):boolean
 ---@field run fun(runner: flutter.Runner, opts: RunOpts, paths:table, args:table, cwd:string, on_run_data:fun(is_err:boolean, data:string), on_run_exit:fun(data:string[], args: table, opts: RunOpts?, project_conf: flutter.ProjectConfig?,launch_config: dap.Configuration?),  is_flutter_project: boolean, project_conf: flutter.ProjectConfig?, launch_config: dap.Configuration?)
 ---@field cleanup fun(funner: flutter.Runner)
----@field send fun(runner: flutter.Runner, cmd:string, quiet: boolean?)
+---@field send fun(runner: flutter.Runner, cmd:string, quiet: boolean?, on_response: fun(response: any)|nil)
 ---@field attach fun(runner: flutter.Runner, paths:table, args:table, cwd:string, on_run_data:fun(is_err:boolean, data:string), on_run_exit:fun(data:string[], args: table, project_conf: flutter.ProjectConfig?,launch_config: dap.Configuration?))
 
 ---@type flutter.Runner?
 local runner = nil
 
 local fvm_name = path.is_windows and "fvm.bat" or "fvm"
+
+local has_notified_new_flutter_version = false
 
 local function use_debugger_runner(force_debug)
   if force_debug or config.debugger.enabled then
@@ -249,10 +252,14 @@ local function run(opts, project_conf, launch_config)
         project_conf.pre_run_callback(callback_args)
       end
     end
+
     local cwd = config_utils.get_cwd(project_conf)
-    -- To determinate if the project is a flutter project we need to check if the pubspec.yaml
-    -- file has a flutter dependency in it. We need to get cwd first to pick correct pubspec.yaml file.
+
+    -- To determinate if the project is a flutter project we need to check if
+    -- the pubspec.yaml file has a flutter dependency in it. We need to get
+    -- cwd first to pick correct pubspec.yaml file.
     local is_flutter_project = has_flutter_dependency_in_pubspec(cwd)
+
     local default_run_args = config.default_run_args
     local run_args
     if is_flutter_project then
@@ -262,6 +269,7 @@ local function run(opts, project_conf, launch_config)
       ui.notify("Starting dart project...")
       if default_run_args then run_args = default_run_args.dart end
     end
+
     if run_args then
       if type(run_args) == "string" then
         vim.list_extend(args, vim.split(run_args, " "))
@@ -269,18 +277,26 @@ local function run(opts, project_conf, launch_config)
         vim.list_extend(args, run_args)
       end
     end
-    runner = use_debugger_runner(opts.force_debug) and debugger_runner or job_runner
-    runner:run(
-      opts,
-      paths,
-      args,
-      cwd,
-      on_run_data,
-      on_run_exit,
-      is_flutter_project,
-      project_conf,
-      launch_config
-    )
+
+    banner.clear_startup_banners(is_flutter_project, function(detected_banners)
+      if detected_banners.has_flutter_new_version and not has_notified_new_flutter_version then
+        has_notified_new_flutter_version = true
+        ui.notify(banner.PATTERNS.FLUTTER_NEW_VERSION, ui.INFO)
+      end
+
+      runner = use_debugger_runner(opts.force_debug) and debugger_runner or job_runner
+      runner:run(
+        opts,
+        paths,
+        args,
+        cwd,
+        on_run_data,
+        on_run_exit,
+        is_flutter_project,
+        project_conf,
+        launch_config
+      )
+    end)
   end)
 end
 
@@ -325,9 +341,10 @@ end
 ---@param cmd string
 ---@param quiet boolean?
 ---@param on_send function|nil
-local function send(cmd, quiet, on_send)
+---@param on_response fun(response:any)|nil
+local function send(cmd, quiet, on_send, on_response)
   if M.is_running() and runner then
-    runner:send(cmd, quiet)
+    runner:send(cmd, quiet, on_response)
     if on_send then on_send() end
   elseif not quiet then
     ui.notify("Sorry! Flutter is not running")
@@ -353,6 +370,18 @@ function M.quit(quiet)
     end
   end)
 end
+
+---@param quiet boolean?
+function M.change_target_platform(quiet)
+  send("change_target_platform", quiet, nil, function(response)
+    if not quiet then
+      ui.notify("Changing platform to " .. response.value, nil, { timeout = 1500 })
+    end
+  end)
+end
+
+---@param quiet boolean?
+function M.brightness(quiet) send("brightness", quiet) end
 
 ---@param quiet boolean?
 function M.visual_debug(quiet) send("visual_debug", quiet) end

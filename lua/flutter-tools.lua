@@ -31,6 +31,8 @@ local function setup_commands()
   command("FlutterRestart", commands.restart)
   command("FlutterQuit", commands.quit)
   command("FlutterVisualDebug", commands.visual_debug)
+  command("FlutterChangeTargetPlatform", commands.change_target_platform)
+  command("FlutterToggleBrightness", commands.brightness)
   -- Lists
   command("FlutterDevices", devices.list_devices)
   command("FlutterEmulators", devices.list_emulators)
@@ -43,6 +45,7 @@ local function setup_commands()
   command("FlutterCopyProfilerUrl", commands.copy_profiler_url)
   command("FlutterCopyDTDUrl", commands.copy_dtd_url)
   command("FlutterOpenDevTools", commands.open_dev_tools)
+  command("FlutterInspectWidget", commands.inspect_widget)
   command("FlutterPubGet", commands.pub_get)
   command("FlutterPubUpgrade", function(data) commands.pub_upgrade_command(data.args) end, {
     nargs = "*",

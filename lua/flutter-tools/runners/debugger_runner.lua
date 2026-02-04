@@ -5,6 +5,7 @@ local config = lazy.require("flutter-tools.config") ---@module "flutter-tools.co
 local utils = lazy.require("flutter-tools.utils") ---@module "flutter-tools.utils"
 local path = lazy.require("flutter-tools.utils.path") ---@module "flutter-tools.utils.path"
 local vm_service_extensions = lazy.require("flutter-tools.runners.vm_service_extensions") ---@module "flutter-tools.runners.vm_service_extensions"
+local vm_service = lazy.require("flutter-tools.vm_service") ---@module "flutter-tools.vm_service"
 local success, dap = pcall(require, "dap")
 if not success then
   ui.notify(string.format("nvim-dap is not installed!\n%s", dap), ui.ERROR)
@@ -106,6 +107,62 @@ local function register_default_configurations(paths, is_flutter_project, projec
   end
 end
 
+local function get_current_value(cmd)
+  local service_activation_params = vm_service_extensions.get_request_params(cmd)
+  if not service_activation_params or not service_activation_params.params.isolateId then return end
+
+  service_activation_params.params = {
+    isolateId = service_activation_params.params.isolateId,
+  }
+  dap.session():request("callService", service_activation_params, function(err, result)
+    if err then return end
+    vm_service_extensions.set_service_extensions_state(result.method, result.value)
+  end)
+end
+
+local function handle_inspect_event(isolate_id)
+  local session = dap.session()
+  if not session or not isolate_id then return end
+
+  local inspector_group = "flutter-tools-inspector"
+
+  local params = {
+    method = "ext.flutter.inspector.getSelectedSummaryWidget",
+    params = {
+      previousSelectionId = vim.NIL,
+      objectGroup = inspector_group,
+      isolateId = isolate_id,
+    },
+  }
+
+  session:request("callService", params, function(err, result)
+    if err or not result then return end
+
+    local widget_data = result.result or result
+    local location = widget_data.creationLocation
+    if not location and widget_data.children and widget_data.children[1] then
+      location = widget_data.children[1].creationLocation
+    end
+
+    if location and location.file and location.line then
+      local file = location.file:gsub("^file://", "")
+      if vim.loop.os_uname().sysname == "Windows_NT" then
+        -- On Windows, the file URI may start with an extra slash
+        file = file:gsub("^/", "")
+      end
+      vim.schedule(function()
+        vim.cmd("edit " .. vim.fn.fnameescape(file))
+        vim.api.nvim_win_set_cursor(0, { location.line, (location.column or 1) - 1 })
+      end)
+    end
+
+    session:request("callService", {
+      method = "ext.flutter.inspector.disposeGroup",
+      params = { objectGroup = inspector_group, isolateId = isolate_id },
+    }, function() end)
+  end)
+end
+
 local function register_dap_listeners(on_run_data, on_run_exit)
   local started = false
   local before_start_logs = {}
@@ -115,6 +172,7 @@ local function register_dap_listeners(on_run_data, on_run_exit)
 
   local handle_termination = function()
     if next(before_start_logs) ~= nil then on_run_exit(before_start_logs) end
+    if vm_service.is_connected() then vm_service.disconnect() end
   end
 
   dap.listeners.before["event_exited"][plugin_identifier] = function(_, _) handle_termination() end
@@ -127,12 +185,27 @@ local function register_dap_listeners(on_run_data, on_run_exit)
   end
 
   dap.listeners.before["event_dart.debuggerUris"][plugin_identifier] = function(_, body)
-    if body and body.vmServiceUri then dev_tools.register_profiler_url(body.vmServiceUri) end
+    if body and body.vmServiceUri then
+      dev_tools.register_profiler_url(body.vmServiceUri)
+
+      vm_service.connect(body.vmServiceUri, function()
+        vm_service.stream_listen("Debug", function(event)
+          if event and event.kind == "Inspect" and event.isolate and event.isolate.id then
+            handle_inspect_event(event.isolate.id)
+          end
+        end)
+      end)
+    end
   end
 
   dap.listeners.before["event_dart.serviceExtensionAdded"][plugin_identifier] = function(_, body)
     if body and body.extensionRPC and body.isolateId then
       vm_service_extensions.set_isolate_id(body.extensionRPC, body.isolateId)
+      if body.extensionRPC == "ext.flutter.brightnessOverride" then
+        get_current_value("brightness")
+      elseif body.extensionRPC == "ext.flutter.platformOverride" then
+        get_current_value("change_target_platform")
+      end
     end
   end
 
@@ -280,7 +353,7 @@ function DebuggerRunner:attach(paths, args, cwd, on_run_data, on_run_exit)
   end
 end
 
-function DebuggerRunner:send(cmd, quiet)
+function DebuggerRunner:send(cmd, quiet, on_response)
   if cmd == "open_dev_tools" then
     dev_tools.open_dev_tools()
     return
@@ -292,10 +365,11 @@ function DebuggerRunner:send(cmd, quiet)
   end
   local service_activation_params = vm_service_extensions.get_request_params(cmd)
   if service_activation_params then
-    dap.session():request("callService", service_activation_params, function(err, _)
+    dap.session():request("callService", service_activation_params, function(err, response)
       if err and not quiet then
         ui.notify("Error calling service " .. cmd .. ": " .. err, ui.ERROR)
       end
+      if response and on_response then on_response(response) end
     end)
     return
   end
